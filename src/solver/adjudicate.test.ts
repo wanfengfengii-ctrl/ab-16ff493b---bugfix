@@ -188,4 +188,65 @@ describe('adjudicate · 无可行方案的诊断', () => {
       expect(v.kinds).toEqual(['load', 'torque-high']);
     }
   });
+
+  it('小数载荷恰近上限：总质量 1.0000000004 对上限 1 必须判无可行方案', () => {
+    // 两条零力臂导轨、力矩闭区间 [0,0]；4 块 0.2500000001 的配重按录入十进制值
+    // 求和为 1.0000000004，真实超限 4e-10，不得被浮点容差吞没。
+    const outcome = adjudicate({
+      rails: rails(['M1', 0], ['M2', 0]),
+      blocks: [
+        block('b1', 0.2500000001, [[0, 1], [1, 1]]),
+        block('b2', 0.2500000001, [[0, 1], [1, 1]]),
+        block('b3', 0.2500000001, [[0, 1], [1, 1]]),
+        block('b4', 0.2500000001, [[0, 1], [1, 1]]),
+      ],
+      limits: limits(1, 0, 0),
+    });
+    expect(outcome.feasible).toBe(false);
+    if (outcome.feasible) return;
+    // 前三步仍是安全前缀：已挂质量 0.7500000003 ≤ 1，力矩恒为 0 ∈ [0,0]。
+    expect(outcome.report.witnessPrefix).toHaveLength(3);
+    expect(outcome.report.witnessPrefix[2].cumulativeMass).toBeCloseTo(0.7500000003, 10);
+    for (const s of outcome.report.witnessPrefix) {
+      expect(s.cumulativeTorque).toBe(0);
+      expect(s.loadMargin).toBeGreaterThanOrEqual(0);
+    }
+    // 第 4 步：剩余配重的两个导轨选择都应明确报告总载荷超限（且仅超限载荷）。
+    expect(outcome.report.violations).toHaveLength(2);
+    expect(outcome.report.violations.map((v) => [v.blockIndex, v.railName])).toEqual([
+      [3, 'M1'],
+      [3, 'M2'],
+    ]);
+    for (const v of outcome.report.violations) {
+      expect(v.kinds).toEqual(['load']);
+      expect(v.massAfter).toBeCloseTo(1.0000000004, 10);
+      expect(v.torqueAfter).toBe(0);
+    }
+  });
+
+  it('小数载荷恰达上限：总质量恰好等于上限时仍判可行（边界判定不变）', () => {
+    // 4 块 0.25 总质量恰为 1，载荷余量最后一步为 0，力矩恒在 [0,0] 边界上。
+    const outcome = adjudicate({
+      rails: rails(['M1', 0], ['M2', 0]),
+      blocks: [
+        block('b1', 0.25, [[0, 1], [1, 2]]),
+        block('b2', 0.25, [[0, 1], [1, 2]]),
+        block('b3', 0.25, [[0, 1], [1, 2]]),
+        block('b4', 0.25, [[0, 1], [1, 2]]),
+      ],
+      limits: limits(1, 0, 0),
+    });
+    expect(outcome.feasible).toBe(true);
+    if (!outcome.feasible) return;
+    expect(outcome.plan.steps.map((s) => [s.blockIndex, s.railName])).toEqual([
+      [0, 'M1'],
+      [1, 'M1'],
+      [2, 'M1'],
+      [3, 'M1'],
+    ]);
+    expect(outcome.plan.totalCost).toBeCloseTo(4);
+    expect(outcome.plan.minTorqueMargin).toBeCloseTo(0);
+    expect(outcome.plan.finalMass).toBeCloseTo(1);
+    expect(outcome.plan.steps[3].loadMargin).toBeCloseTo(0);
+  });
 });

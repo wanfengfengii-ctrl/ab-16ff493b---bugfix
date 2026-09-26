@@ -75,6 +75,40 @@ if (!r2.feasible) {
   );
 }
 
+// 小数边界场景：4 块 0.2500000001 总质量 1.0000000004，按录入十进制值已超上限 1，
+// 必须判无可行方案；前三步为安全前缀，第 4 步两个导轨选择均报告总载荷超限。
+const decimalBoundaryScenario: Scenario = {
+  rails: [
+    { id: 'M1', name: 'M1', coordinate: 0 },
+    { id: 'M2', name: 'M2', coordinate: 0 },
+  ],
+  blocks: [0, 1, 2, 3].map((i) => ({
+    id: `b${i}`,
+    name: `b${i}`,
+    mass: 0.2500000001,
+    options: [
+      { railId: 'M1', cost: 1 },
+      { railId: 'M2', cost: 1 },
+    ],
+  })),
+  limits: { maxLoad: 1, minTorque: 0, maxTorque: 0 },
+};
+
+const r3 = adjudicate(decimalBoundaryScenario);
+check(!r3.feasible, '裁决模块：总质量 1.0000000004 对上限 1 应判定为不可行');
+if (!r3.feasible) {
+  check(
+    r3.report.witnessPrefix.length === 3 &&
+      r3.report.witnessPrefix.every((s) => s.cumulativeTorque === 0 && s.loadMargin >= 0),
+    '裁决模块：小数边界场景的前三步应为安全前缀（长度 3）',
+  );
+  check(
+    r3.report.violations.length === 2 &&
+      r3.report.violations.every((v) => v.blockIndex === 3 && v.kinds.length === 1 && v.kinds[0] === 'load'),
+    '裁决模块：第 4 步的两个导轨选择均应报告总载荷超限',
+  );
+}
+
 // ---------- 2. 已启动页面健康端点冒烟 ----------
 
 const deadline = Date.now() + 60_000;

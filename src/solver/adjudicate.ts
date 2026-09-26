@@ -8,8 +8,24 @@ import type {
   ViolationKind,
 } from './types';
 
-/** 数值比较容差：质量/力矩为浮点录入，边界判定与决胜比较统一使用。 */
+/** 决胜比较容差：力矩余量与总代价的并列判定使用。 */
 export const EPS = 1e-9;
+
+/**
+ * 安全边界（总载荷 / 力矩闭区间）判定容差。
+ *
+ * 仅用于吸收累加与乘法链的浮点舍入（相对量级约 1e-16），远小于录入小数
+ * 在边界附近的真实超出量：按录入的十进制值计算，恰好触及边界的方案仍判可行，
+ * 而任何真实超限（例如总载荷 1.0000000004 对上限 1，超出 4e-10）都必须判不可行。
+ * 绝对项兜底零点附近，相对项随数值规模伸缩。
+ */
+const BOUND_ABS_TOL = 1e-12;
+const BOUND_REL_TOL = 1e-14;
+
+/** 安全边界判定的容差：随参与比较的数值规模伸缩。 */
+function boundTol(a: number, b: number): number {
+  return BOUND_ABS_TOL + BOUND_REL_TOL * Math.max(Math.abs(a), Math.abs(b));
+}
 
 interface FlatOption {
   optionIndex: number;
@@ -109,9 +125,14 @@ export function adjudicate(scenario: Scenario): AdjudicationOutcome {
       const block = blocks[i];
       for (const opt of block.options) {
         const massAfter = mass + block.mass;
-        if (massAfter > limits.maxLoad + EPS) continue;
+        if (massAfter > limits.maxLoad + boundTol(massAfter, limits.maxLoad)) continue;
         const torqueAfter = torque + block.mass * opt.coordinate;
-        if (torqueAfter < limits.minTorque - EPS || torqueAfter > limits.maxTorque + EPS) continue;
+        if (
+          torqueAfter < limits.minTorque - boundTol(torqueAfter, limits.minTorque) ||
+          torqueAfter > limits.maxTorque + boundTol(torqueAfter, limits.maxTorque)
+        ) {
+          continue;
+        }
         const margin = torqueMarginOf(torqueAfter, limits);
         const nextMinMargin = Math.min(minMargin, margin);
         const nextCost = cost + opt.cost;
@@ -163,9 +184,9 @@ export function adjudicate(scenario: Scenario): AdjudicationOutcome {
       const massAfter = baseMass + block.mass;
       const torqueAfter = baseTorque + block.mass * opt.coordinate;
       const kinds: ViolationKind[] = [];
-      if (massAfter > limits.maxLoad + EPS) kinds.push('load');
-      if (torqueAfter < limits.minTorque - EPS) kinds.push('torque-low');
-      if (torqueAfter > limits.maxTorque + EPS) kinds.push('torque-high');
+      if (massAfter > limits.maxLoad + boundTol(massAfter, limits.maxLoad)) kinds.push('load');
+      if (torqueAfter < limits.minTorque - boundTol(torqueAfter, limits.minTorque)) kinds.push('torque-low');
+      if (torqueAfter > limits.maxTorque + boundTol(torqueAfter, limits.maxTorque)) kinds.push('torque-high');
       if (kinds.length > 0) {
         violations.push({
           blockIndex: block.index,
