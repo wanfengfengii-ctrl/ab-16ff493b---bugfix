@@ -1,0 +1,30 @@
+{
+  "name": "theater-counterweight-adjudicator",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "剧场升降幕配重挂装顺序裁决（联合确定挂装位置与次序，前缀状态全程满足载荷与力矩约束）",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "start": "node server.mjs",
+    "test": "vitest run",
+    "smoke": "tsx scripts/smoke.ts",
+    "verify:container": "npm run test && npm run build && npm run smoke"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "tsx": "^4.19.0",
+    "typescript": "~5.6.2",
+    "vite": "^5.4.8",
+    "vitest": "^2.1.1"
+  }
+}

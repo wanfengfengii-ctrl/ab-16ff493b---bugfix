@@ -1,0 +1,31 @@
+name: theater-counterweight-adjudicator
+
+services:
+  web:
+    build:
+      context: .
+      target: web
+    environment:
+      PORT: 8080
+    ports:
+      # 宿主机端口可通过 WEB_PORT 环境变量配置，默认 8080
+      - "${WEB_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  # 一次性服务：代码测试 + 构建 + 对已启动页面健康端点与裁决业务模块的冒烟，
+  # 完成后自行退出并以退出码报告结果（0 通过 / 非 0 失败）。
+  verify:
+    build:
+      context: .
+      target: verify
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      WEB_HOST: web
+      WEB_PORT: 8080
