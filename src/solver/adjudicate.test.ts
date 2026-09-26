@@ -137,6 +137,74 @@ describe('adjudicate · 可行方案与决胜规则', () => {
 });
 
 describe('adjudicate · 无可行方案的诊断', () => {
+  it('小数载荷恰近上限：4 × 0.2500000001 真实超载，须判不可行', () => {
+    // 两条力臂 0 的导轨、总载荷上限 1、力矩闭区间 [0,0]；
+    // 4 块 0.2500000001 的配重按十进制值合计 1.0000000004 > 1，
+    // 浮点容差不得把该越界（约 4e-10）吞没为可行。
+    const outcome = adjudicate({
+      rails: rails(['L', 0], ['R', 0]),
+      blocks: [
+        block('b1', 0.2500000001, [[0, 1], [1, 1]]),
+        block('b2', 0.2500000001, [[0, 1], [1, 1]]),
+        block('b3', 0.2500000001, [[0, 1], [1, 1]]),
+        block('b4', 0.2500000001, [[0, 1], [1, 1]]),
+      ],
+      limits: limits(1, 0, 0),
+    });
+    expect(outcome.feasible).toBe(false);
+    if (outcome.feasible) return;
+    // 前三步仍是安全前缀（0.7500000003 ≤ 1，力矩恒为 0）
+    expect(outcome.report.witnessPrefix).toHaveLength(3);
+    expect(outcome.report.witnessPrefix.map((s) => s.blockIndex)).toEqual([0, 1, 2]);
+    expect(outcome.report.witnessPrefix[2].cumulativeMass).toBeCloseTo(0.7500000003, 10);
+    // 第 4 步：剩余配重的两个导轨选择都应明确报告总载荷超限
+    expect(outcome.report.violations).toHaveLength(2);
+    for (const v of outcome.report.violations) {
+      expect(v.blockIndex).toBe(3);
+      expect(v.kinds).toEqual(['load']);
+      expect(v.massAfter).toBeCloseTo(1.0000000004, 10);
+      expect(v.massAfter).toBeGreaterThan(1);
+    }
+    expect(new Set(outcome.report.violations.map((v) => v.railName))).toEqual(new Set(['L', 'R']));
+  });
+
+  it('小数力矩恰近上限：4 × 0.2500000001 × 力臂 1 真实越界，须判不可行', () => {
+    const outcome = adjudicate({
+      rails: rails(['R', 1], ['R2', 1]),
+      blocks: [
+        block('b1', 0.2500000001, [[0, 1], [1, 1]]),
+        block('b2', 0.2500000001, [[0, 1], [1, 1]]),
+        block('b3', 0.2500000001, [[0, 1], [1, 1]]),
+        block('b4', 0.2500000001, [[0, 1], [1, 1]]),
+      ],
+      limits: limits(100, 0, 1),
+    });
+    expect(outcome.feasible).toBe(false);
+    if (outcome.feasible) return;
+    expect(outcome.report.witnessPrefix).toHaveLength(3);
+    expect(outcome.report.violations).toHaveLength(2);
+    for (const v of outcome.report.violations) {
+      expect(v.kinds).toEqual(['torque-high']);
+      expect(v.torqueAfter).toBeCloseTo(1.0000000004, 10);
+      expect(v.torqueAfter).toBeGreaterThan(1);
+    }
+  });
+
+  it('十进制恰达上限的合法录入（0.1 + 0.2 ≤ 0.3）不得被误判为超载', () => {
+    // 0.1 + 0.2 的浮点结果为 0.30000000000000004，纯舍入误差（约 5.6e-17），
+    // 边界判定仍须吸收该量级误差，保持恰达边界的合法方案可行。
+    const outcome = adjudicate({
+      rails: rails(['M', 0], ['N', 0]),
+      blocks: [block('b1', 0.1, [[0, 1], [1, 1]]), block('b2', 0.2, [[0, 1], [1, 1]])],
+      limits: limits(0.3, 0, 0),
+    });
+    expect(outcome.feasible).toBe(true);
+    if (!outcome.feasible) return;
+    expect(outcome.plan.steps).toHaveLength(2);
+    expect(outcome.plan.finalMass).toBeCloseTo(0.3, 12);
+  });
+
+
   it('第一步即不可挂：已选前缀为空，逐一列出触发的力矩限制', () => {
     const outcome = adjudicate({
       rails: rails(['L', -1], ['R', 1]),

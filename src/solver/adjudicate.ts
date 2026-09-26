@@ -8,8 +8,37 @@ import type {
   ViolationKind,
 } from './types';
 
-/** 数值比较容差：质量/力矩为浮点录入，边界判定与决胜比较统一使用。 */
+/**
+ * 决胜比较容差：不同候选方案的力矩余量 / 总代价在此差值内视为并列。
+ * 仅用于方案之间的优劣比较，不用于载荷 / 力矩的边界判定。
+ */
 export const EPS = 1e-9;
+
+/**
+ * 边界判定的相对容差系数：只允许抵消 IEEE-754 四则运算引入的舍入误差
+ * （数次乘加约数个 ulp，相对误差 1e-16 量级），绝不吞没按录入十进制值
+ * 真实存在的越界量——例如 4 × 0.2500000001 = 1.0000000004 超出上限 1
+ * （越界约 4e-10），必须判定为超载。
+ */
+const ROUND_SLOP = 16 * Number.EPSILON;
+
+/** 与参与比较的数值量级挂钩的舍入容差（绝对值）。 */
+function roundSlop(a: number, b: number): number {
+  return ROUND_SLOP * Math.max(1, Math.abs(a), Math.abs(b));
+}
+
+/** 已挂质量是否超过总载荷上限：闭区间判定，恰等于上限（扣除舍入误差）可行。 */
+function exceedsLoad(massAfter: number, maxLoad: number): boolean {
+  return massAfter > maxLoad + roundSlop(massAfter, maxLoad);
+}
+
+/** 挂后力矩越出力矩闭区间时触发的限制（DFS 剪枝与不可行诊断共用，保证口径一致）。 */
+function torqueViolationKinds(torqueAfter: number, limits: Limits): ViolationKind[] {
+  const kinds: ViolationKind[] = [];
+  if (torqueAfter < limits.minTorque - roundSlop(torqueAfter, limits.minTorque)) kinds.push('torque-low');
+  if (torqueAfter > limits.maxTorque + roundSlop(torqueAfter, limits.maxTorque)) kinds.push('torque-high');
+  return kinds;
+}
 
 interface FlatOption {
   optionIndex: number;
@@ -109,9 +138,9 @@ export function adjudicate(scenario: Scenario): AdjudicationOutcome {
       const block = blocks[i];
       for (const opt of block.options) {
         const massAfter = mass + block.mass;
-        if (massAfter > limits.maxLoad + EPS) continue;
+        if (exceedsLoad(massAfter, limits.maxLoad)) continue;
         const torqueAfter = torque + block.mass * opt.coordinate;
-        if (torqueAfter < limits.minTorque - EPS || torqueAfter > limits.maxTorque + EPS) continue;
+        if (torqueViolationKinds(torqueAfter, limits).length > 0) continue;
         const margin = torqueMarginOf(torqueAfter, limits);
         const nextMinMargin = Math.min(minMargin, margin);
         const nextCost = cost + opt.cost;
@@ -163,9 +192,8 @@ export function adjudicate(scenario: Scenario): AdjudicationOutcome {
       const massAfter = baseMass + block.mass;
       const torqueAfter = baseTorque + block.mass * opt.coordinate;
       const kinds: ViolationKind[] = [];
-      if (massAfter > limits.maxLoad + EPS) kinds.push('load');
-      if (torqueAfter < limits.minTorque - EPS) kinds.push('torque-low');
-      if (torqueAfter > limits.maxTorque + EPS) kinds.push('torque-high');
+      if (exceedsLoad(massAfter, limits.maxLoad)) kinds.push('load');
+      kinds.push(...torqueViolationKinds(torqueAfter, limits));
       if (kinds.length > 0) {
         violations.push({
           blockIndex: block.index,
